@@ -8,8 +8,143 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { google } from 'googleapis';
 import Groq from 'groq-sdk';
+import nodemailer from 'nodemailer';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ── Email transporter ─────────────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_FROM,
+    pass: process.env.EMAIL_APP_PASSWORD,
+  },
+});
+
+function clinicEmail(to, subject, html) {
+  return transporter.sendMail({
+    from: `"Well Being Clinic" <${process.env.EMAIL_FROM}>`,
+    to, subject, html,
+  });
+}
+
+const emailBase = (content) => `
+  <div style="font-family:'DM Sans',Arial,sans-serif;max-width:580px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+    <div style="background:linear-gradient(135deg,#0f1f17 0%,#1a3d2b 100%);padding:32px 40px;text-align:center">
+      <div style="display:inline-block;background:linear-gradient(135deg,#1a9e6b,#0d7a52);width:48px;height:48px;border-radius:12px;line-height:48px;font-size:22px;margin-bottom:12px">🌿</div>
+      <h1 style="font-family:Georgia,serif;color:white;font-size:22px;margin:0;letter-spacing:-0.3px">Well Being Clinic</h1>
+      <p style="color:rgba(255,255,255,0.6);font-size:13px;margin:4px 0 0">Naturopathy & Wellness, Hyderabad</p>
+    </div>
+    <div style="padding:36px 40px">${content}</div>
+    <div style="background:#f8faf9;padding:20px 40px;text-align:center;border-top:1px solid #e5e7eb">
+      <p style="font-size:12px;color:#9ca3af;margin:0">📍 Indu Fortune Fields, KPHB Colony Phase-13, Kukatpally, Hyderabad 500085</p>
+      <p style="font-size:12px;color:#9ca3af;margin:6px 0 0">© 2026 Well Being Clinic. All rights reserved.</p>
+    </div>
+  </div>
+`;
+
+// OTP store (in-memory — fine for this scale)
+const otpStore = new Map(); // email -> { otp, expires }
+
+function generateOTP() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function sendOTPEmail(email, name) {
+  const otp = generateOTP();
+  otpStore.set(email, { otp, expires: Date.now() + 10 * 60 * 1000 }); // 10 min
+  const html = emailBase(`
+    <h2 style="font-family:Georgia,serif;color:#0f1f17;font-size:22px;margin:0 0 8px">Verify your email</h2>
+    <p style="color:#6b7280;font-size:15px;line-height:1.6;margin:0 0 28px">Hi ${name}, welcome to Well Being Clinic! Use the OTP below to verify your email address.</p>
+    <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:2px solid #bbf7d0;border-radius:16px;padding:28px;text-align:center;margin:0 0 28px">
+      <p style="font-size:13px;color:#6b7280;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.1em">Your OTP</p>
+      <p style="font-family:Georgia,serif;font-size:42px;font-weight:700;color:#0f1f17;margin:0;letter-spacing:8px">${otp}</p>
+      <p style="font-size:12px;color:#9ca3af;margin:8px 0 0">Valid for 10 minutes</p>
+    </div>
+    <p style="color:#9ca3af;font-size:13px;margin:0">If you did not create an account, please ignore this email.</p>
+  `);
+  await clinicEmail(email, 'Your Well Being Clinic OTP', html);
+  return otp;
+}
+
+async function sendBookingConfirmation({ patientEmail, patientName, doctorName, date, time, type, mode, meetLink, patientId }) {
+  const modeBlock = mode === 'online' && meetLink
+    ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px 20px;margin:20px 0">
+        <p style="font-size:13px;color:#1d4ed8;font-weight:700;margin:0 0 6px">💻 Online Consultation</p>
+        <p style="font-size:13px;color:#374151;margin:0">Your Google Meet link: <a href="${meetLink}" style="color:#1d4ed8">${meetLink}</a></p>
+        <p style="font-size:12px;color:#6b7280;margin:6px 0 0">The "Join Meeting" button activates 10 minutes before your appointment.</p>
+      </div>`
+    : `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:16px 20px;margin:20px 0">
+        <p style="font-size:13px;color:#15803d;font-weight:700;margin:0 0 4px">🏥 In-Person Consultation</p>
+        <p style="font-size:13px;color:#374151;margin:0">Indu Fortune Fields, The Annexe, KPHB Colony Phase-13, Kukatpally, Hyderabad 500085</p>
+      </div>`;
+
+  const html = emailBase(`
+    <h2 style="font-family:Georgia,serif;color:#0f1f17;font-size:22px;margin:0 0 8px">Appointment Confirmed ✅</h2>
+    <p style="color:#6b7280;font-size:15px;line-height:1.6;margin:0 0 24px">Hi ${patientName}, your appointment has been successfully booked.</p>
+    <div style="background:#f8faf9;border-radius:14px;padding:20px 24px;margin:0 0 20px">
+      <table style="width:100%;border-collapse:collapse">
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0;width:40%">Treatment</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${type}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Doctor</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${doctorName}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Date</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${date}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Time</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${time}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Patient ID</td><td style="font-size:14px;font-weight:700;color:#1a9e6b;padding:6px 0">${patientId || 'N/A'}</td></tr>
+      </table>
+    </div>
+    ${modeBlock}
+    <p style="color:#9ca3af;font-size:13px;margin:24px 0 0">Need to reschedule? Please contact us at least 2 hours before your appointment.</p>
+  `);
+  await clinicEmail(patientEmail, `Appointment Confirmed — ${type} on ${date}`, html);
+}
+
+async function sendStatusUpdateEmail({ patientEmail, patientName, status, type, date, time, doctorName }) {
+  const isConfirmed = status === 'confirmed';
+  const color = isConfirmed ? '#15803d' : '#dc2626';
+  const bg    = isConfirmed ? '#f0fdf4'  : '#fef2f2';
+  const border= isConfirmed ? '#bbf7d0'  : '#fecaca';
+  const emoji = isConfirmed ? '✅' : '❌';
+  const title = isConfirmed ? 'Appointment Confirmed' : 'Appointment Cancelled';
+  const msg   = isConfirmed
+    ? `Your appointment has been confirmed by ${doctorName}. We look forward to seeing you!`
+    : `Your appointment has been cancelled by ${doctorName}. Please book a new slot at your convenience.`;
+
+  const html = emailBase(`
+    <h2 style="font-family:Georgia,serif;color:#0f1f17;font-size:22px;margin:0 0 8px">${emoji} ${title}</h2>
+    <p style="color:#6b7280;font-size:15px;line-height:1.6;margin:0 0 24px">Hi ${patientName}, ${msg}</p>
+    <div style="background:${bg};border:1px solid ${border};border-radius:14px;padding:20px 24px;margin:0 0 20px">
+      <table style="width:100%;border-collapse:collapse">
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0;width:40%">Treatment</td><td style="font-size:14px;font-weight:700;color:${color};padding:6px 0">${type}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Doctor</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${doctorName}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Date</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${date}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Time</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${time}</td></tr>
+      </table>
+    </div>
+    ${!isConfirmed ? '<a href="http://localhost:5173/patient" style="display:inline-block;background:linear-gradient(135deg,#1a9e6b,#0d7a52);color:white;font-weight:700;font-size:14px;padding:12px 28px;border-radius:100px;text-decoration:none;margin-top:8px">Book a New Appointment</a>' : ''}
+  `);
+  await clinicEmail(patientEmail, `${title} — ${type} on ${date}`, html);
+}
+
+async function sendReminderEmail({ patientEmail, patientName, type, date, time, doctorName, mode, meetLink }) {
+  const modeText = mode === 'online'
+    ? `This is an online consultation. <a href="${meetLink}" style="color:#1d4ed8">Join via Google Meet</a> (link activates 10 min before).`
+    : 'This is an in-person visit at Indu Fortune Fields, KPHB Colony Phase-13, Kukatpally, Hyderabad.';
+
+  const html = emailBase(`
+    <h2 style="font-family:Georgia,serif;color:#0f1f17;font-size:22px;margin:0 0 8px">⏰ Appointment Reminder</h2>
+    <p style="color:#6b7280;font-size:15px;line-height:1.6;margin:0 0 24px">Hi ${patientName}, this is a reminder that you have an appointment tomorrow.</p>
+    <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:14px;padding:20px 24px;margin:0 0 20px">
+      <table style="width:100%;border-collapse:collapse">
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0;width:40%">Treatment</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${type}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Doctor</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${doctorName}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Date</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${date}</td></tr>
+        <tr><td style="font-size:13px;color:#9ca3af;padding:6px 0">Time</td><td style="font-size:14px;font-weight:700;color:#0f1f17;padding:6px 0">${time}</td></tr>
+      </table>
+    </div>
+    <p style="color:#6b7280;font-size:14px;margin:0">${modeText}</p>
+  `);
+  await clinicEmail(patientEmail, `Reminder: ${type} tomorrow at ${time}`, html);
+}
+
+
 
 import Patient from './patient.js';
 import User from './User.js';
@@ -17,7 +152,7 @@ import Appointment from './Appointment.js';
 
 const app = express();
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://wellbeingcures.in', 'https://www.wellbeingcures.in'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -143,10 +278,10 @@ app.get('/auth/google/callback', async (req, res) => {
     });
 
     // Redirect back to doctor dashboard with success
-    res.redirect('http://localhost:5173/doctor?google=connected');
+    res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '/doctor?google=connected');
   } catch (err) {
     console.error('Google callback error:', err.message);
-    res.redirect('http://localhost:5173/doctor?google=error');
+    res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '/doctor?google=error');
   }
 });
 
@@ -201,6 +336,34 @@ app.get('/api/auth/me', auth, async (req, res) => {
     const user = await User.findById(req.user.id).select('-password');
     res.json(user);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+// ── OTP: Send ─────────────────────────────────────────────────────────────────
+app.post('/api/auth/send-otp', async (req, res) => {
+  try {
+    const { email, name } = req.body;
+    if (!email || !name) return res.status(400).json({ error: 'Email and name required.' });
+    await sendOTPEmail(email, name);
+    res.json({ message: 'OTP sent successfully.' });
+  } catch (err) {
+    console.error('OTP error FULL:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+    res.status(500).json({ error: err.message || 'Failed to send OTP.' });
+  }
+});
+
+// ── OTP: Verify ───────────────────────────────────────────────────────────────
+app.post('/api/auth/verify-otp', (req, res) => {
+  const { email, otp } = req.body;
+  const record = otpStore.get(email);
+  if (!record) return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
+  if (Date.now() > record.expires) {
+    otpStore.delete(email);
+    return res.status(400).json({ error: 'OTP expired. Please request a new one.' });
+  }
+  if (record.otp !== otp) return res.status(400).json({ error: 'Incorrect OTP. Please try again.' });
+  otpStore.delete(email);
+  res.json({ verified: true });
 });
 
 // ── Availability ──────────────────────────────────────────────────────────────
@@ -268,6 +431,16 @@ app.post('/api/appointments', auth, async (req, res) => {
     });
     await appt.save();
     const populated = await appt.populate(['patient', 'doctor']);
+    // Send booking confirmation email
+    try {
+      const pat = await User.findById(req.user.id).select('name email patientId');
+      const doc = await User.findById(doctorId).select('name');
+      await sendBookingConfirmation({
+        patientEmail: pat.email, patientName: pat.name,
+        doctorName: doc.name, date, time, type, mode,
+        meetLink: meetLink || null, patientId: pat.patientId,
+      });
+    } catch (e) { console.error('Booking email error:', e.message); }
     res.status(201).json(populated);
   } catch (err) {
     if (err.code === 11000)
@@ -300,6 +473,17 @@ app.patch('/api/appointments/:id', auth, async (req, res) => {
     const appt = await Appointment.findByIdAndUpdate(
       req.params.id, { status: req.body.status }, { new: true }
     ).populate('patient', 'name email');
+    // Send status update email for confirmed/cancelled
+    if (['confirmed','cancelled'].includes(req.body.status)) {
+      try {
+        const doc = await User.findById(req.user.id).select('name');
+        await sendStatusUpdateEmail({
+          patientEmail: appt.patient.email, patientName: appt.patient.name,
+          status: req.body.status, type: appt.type,
+          date: appt.date, time: appt.time, doctorName: doc.name,
+        });
+      } catch (e) { console.error('Status email error:', e.message); }
+    }
     res.json(appt);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -406,6 +590,46 @@ app.delete('/api/patients/:id', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+// ── Daily reminder cron (runs at 9AM every day) ───────────────────────────────
+async function sendDailyReminders() {
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateStr = tomorrow.toISOString().split('T')[0];
+    const appts = await Appointment.find({ date: dateStr, status: 'confirmed' })
+      .populate('patient', 'name email')
+      .populate('doctor', 'name');
+    console.log(`📧 Sending reminders for ${appts.length} appointments on ${dateStr}`);
+    for (const a of appts) {
+      try {
+        await sendReminderEmail({
+          patientEmail: a.patient.email, patientName: a.patient.name,
+          type: a.type, date: a.date, time: a.time,
+          doctorName: a.doctor.name, mode: a.mode, meetLink: a.meetLink,
+        });
+      } catch (e) { console.error('Reminder error for', a.patient.email, e.message); }
+    }
+  } catch (err) { console.error('Reminder cron error:', err.message); }
+}
+
+// Schedule reminder at 9AM IST every day
+function scheduleDailyReminders() {
+  const now = new Date();
+  const next9AM = new Date();
+  next9AM.setHours(9, 0, 0, 0);
+  if (now >= next9AM) next9AM.setDate(next9AM.getDate() + 1);
+  const msUntil9AM = next9AM - now;
+  setTimeout(() => {
+    sendDailyReminders();
+    setInterval(sendDailyReminders, 24 * 60 * 60 * 1000);
+  }, msUntil9AM);
+  console.log(`⏰ Reminder cron scheduled — next run in ${Math.round(msUntil9AM/1000/60)} minutes`);
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server listening at http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server listening at http://localhost:${PORT}`);
+  scheduleDailyReminders();
+});

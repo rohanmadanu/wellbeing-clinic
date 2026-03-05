@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 
-const API = 'http://localhost:5001/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 const TREATMENTS = ['Weight Loss','Pain Management','Menopausal Syndrome','Detox','Migraine','Yoga','Acupuncture','Fatty Liver','High Cholesterol','Sciatica','Spondylitis','Sleep Apnoea','Allergic Rhinitis','General Consultation'];
 
 function authHeaders() {

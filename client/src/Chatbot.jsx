@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
-const API = 'http://localhost:5001/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 const SUGGESTED_QUESTIONS = [
   'Which package is right for me?',

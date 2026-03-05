@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
 
-const API = 'http://localhost:5001/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 function authHeaders() { return { headers: { Authorization: `Bearer ${localStorage.getItem('wb_token')}` } }; }
 
 function canStart(date, time) {
@@ -50,7 +50,7 @@ export default function DoctorDashboard({ user, onLogout }) {
 
   async function connectGoogle() {
     try {
-      const { data } = await axios.get('http://localhost:5001/auth/google', authHeaders());
+      const { data } = await axios.get((import.meta.env.VITE_API_BASE || 'http://localhost:5001') + '/auth/google', authHeaders());
       window.location.href = data.url;
     } catch { alert('Failed to start Google auth. Please try again.'); }
   }
