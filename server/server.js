@@ -9,8 +9,118 @@ import jwt from 'jsonwebtoken';
 import { google } from 'googleapis';
 import Groq from 'groq-sdk';
 import nodemailer from 'nodemailer';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import { Mistral } from '@mistralai/mistralai';
+import CaseSheet from './CaseSheet.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
+
+// Multer — store uploads temporarily in memory
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg','image/jpg','image/png','image/webp','application/pdf'];
+    allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Only images and PDFs are allowed.'));
+  },
+});
+
+// ── OCR + Embedding helpers ───────────────────────────────────────────────────
+async function extractTextWithMistral(fileBuffer, mimeType) {
+  // Convert buffer to base64
+  const base64 = fileBuffer.toString('base64');
+  const isImage = mimeType.startsWith('image/');
+
+  if (isImage) {
+    // Use Groq vision for images (higher rate limits)
+    const response = await groq.chat.completions.create({
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: `data:${mimeType};base64,${base64}` },
+          },
+          {
+            type: 'text',
+            text: 'This is a medical case sheet or document. Please extract ALL text from this image exactly as it appears. Include all medical details, measurements, diagnoses, medications, dates and doctor notes. Output only the extracted text, nothing else.',
+          },
+        ],
+      }],
+      max_tokens: 2000,
+    });
+    return response.choices[0].message.content;
+  } else {
+    // For PDFs use Mistral OCR API
+    const formData = new FormData();
+    const blob = new Blob([fileBuffer], { type: mimeType });
+    formData.append('file', blob, 'document.pdf');
+    formData.append('model', 'mistral-ocr-latest');
+
+    const res = await fetch('https://api.mistral.ai/v1/ocr', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.MISTRAL_API_KEY}` },
+      body: formData,
+    });
+    const data = await res.json();
+    return data.pages?.map(p => p.markdown).join('\n\n') || '';
+  }
+}
+
+function chunkText(text, chunkSize = 500, overlap = 50) {
+  const words = text.split(' ');
+  const chunks = [];
+  let i = 0;
+  while (i < words.length) {
+    const chunk = words.slice(i, i + chunkSize).join(' ');
+    if (chunk.trim()) chunks.push(chunk.trim());
+    i += chunkSize - overlap;
+  }
+  return chunks;
+}
+
+async function embedChunks(chunks) {
+  const response = await mistral.embeddings.create({
+    model: 'mistral-embed',
+    inputs: chunks,
+  });
+  return response.data.map(d => d.embedding);
+}
+
+function cosineSimilarity(a, b) {
+  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+  const normA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+  const normB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+  return dot / (normA * normB);
+}
+
+async function findRelevantChunks(query, caseSheets, topK = 5) {
+  const queryEmbedding = (await mistral.embeddings.create({
+    model: 'mistral-embed',
+    inputs: [query],
+  })).data[0].embedding;
+
+  const allChunks = [];
+  for (const sheet of caseSheets) {
+    for (const chunk of sheet.chunks) {
+      allChunks.push({
+        text: chunk.text,
+        score: cosineSimilarity(queryEmbedding, chunk.embedding),
+        fileName: sheet.fileName,
+        date: sheet.uploadedAt,
+      });
+    }
+  }
+
+  return allChunks
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+
 // ── Email transporter ─────────────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -152,7 +262,7 @@ import Appointment from './Appointment.js';
 
 const app = express();
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://wellbeingcures.in', 'https://www.wellbeingcures.in'],
+  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174', 'https://wellbeingcures.in', 'https://www.wellbeingcures.in'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -331,6 +441,14 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.patch('/api/auth/profile', auth, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    const user = await User.findByIdAndUpdate(req.user.id, { name, phone }, { new: true }).select('-password');
+    res.json(user);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
@@ -495,6 +613,162 @@ app.get('/api/doctors', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+
+// ── CASE SHEETS: Upload + OCR + Embed ────────────────────────────────────────
+app.post('/api/casesheets/upload', auth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+
+    const { patientId } = req.body;
+    const targetPatient = patientId || req.user.id;
+
+    // Only allow patients to upload for themselves, doctors can upload for any patient
+    if (req.user.role === 'patient' && targetPatient !== req.user.id)
+      return res.status(403).json({ error: 'Patients can only upload their own case sheets.' });
+
+    console.log(`📄 Processing ${req.file.originalname} (${req.file.mimetype})...`);
+
+    // Step 1: OCR — extract text
+    let extractedText = '';
+    try {
+      extractedText = await extractTextWithMistral(req.file.buffer, req.file.mimetype);
+      console.log(`✅ OCR extracted ${extractedText.length} characters`);
+    } catch (ocrErr) {
+      console.error('OCR error:', ocrErr.message);
+      return res.status(500).json({ error: 'Failed to extract text from file. Please try a clearer image.' });
+    }
+
+    if (!extractedText || extractedText.trim().length < 10)
+      return res.status(400).json({ error: 'Could not extract readable text from this file. Please upload a clearer image.' });
+
+    // Step 2: Chunk text
+    const textChunks = chunkText(extractedText);
+    console.log(`📦 Created ${textChunks.length} chunks`);
+
+    // Step 3: Embed chunks
+    let embeddings = [];
+    try {
+      embeddings = await embedChunks(textChunks);
+    } catch (embErr) {
+      console.error('Embedding error:', embErr.message);
+      return res.status(500).json({ error: 'Failed to process document embeddings.' });
+    }
+
+    // Step 4: Save to MongoDB (text only — no image stored!)
+    const chunks = textChunks.map((text, i) => ({ text, embedding: embeddings[i] }));
+    const caseSheet = new CaseSheet({
+      patient:       targetPatient,
+      fileName:      req.file.originalname,
+      fileType:      req.file.mimetype,
+      extractedText,
+      chunks,
+      uploadedBy:    req.user.role,
+      notes:         req.body.notes || '',
+    });
+    await caseSheet.save();
+
+    res.status(201).json({
+      message: 'Case sheet processed successfully.',
+      id:      caseSheet._id,
+      fileName: caseSheet.fileName,
+      charCount: extractedText.length,
+      chunkCount: chunks.length,
+      preview: extractedText.substring(0, 300) + (extractedText.length > 300 ? '...' : ''),
+    });
+  } catch (err) {
+    console.error('Upload error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CASE SHEETS: List patient's case sheets ───────────────────────────────────
+app.get('/api/casesheets', auth, async (req, res) => {
+  try {
+    const patientId = req.query.patientId || req.user.id;
+    if (req.user.role === 'patient' && patientId !== req.user.id)
+      return res.status(403).json({ error: 'Access denied.' });
+
+    const sheets = await CaseSheet.find({ patient: patientId })
+      .select('-chunks -extractedText') // don't send large data in list
+      .sort({ uploadedAt: -1 });
+    res.json(sheets);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── CASE SHEETS: Get full extracted text ──────────────────────────────────────
+app.get('/api/casesheets/:id', auth, async (req, res) => {
+  try {
+    const sheet = await CaseSheet.findById(req.params.id).select('-chunks');
+    if (!sheet) return res.status(404).json({ error: 'Case sheet not found.' });
+    if (req.user.role === 'patient' && sheet.patient.toString() !== req.user.id)
+      return res.status(403).json({ error: 'Access denied.' });
+    res.json(sheet);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── CASE SHEETS: Delete ───────────────────────────────────────────────────────
+app.delete('/api/casesheets/:id', auth, async (req, res) => {
+  try {
+    const sheet = await CaseSheet.findById(req.params.id);
+    if (!sheet) return res.status(404).json({ error: 'Not found.' });
+    if (req.user.role === 'patient' && sheet.patient.toString() !== req.user.id)
+      return res.status(403).json({ error: 'Access denied.' });
+    await sheet.deleteOne();
+    res.json({ message: 'Case sheet deleted.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── RAG: Query patient history ────────────────────────────────────────────────
+app.post('/api/casesheets/query', auth, async (req, res) => {
+  try {
+    const { question, patientId } = req.body;
+    if (!question) return res.status(400).json({ error: 'Question is required.' });
+
+    const targetPatient = patientId || req.user.id;
+    if (req.user.role === 'patient' && targetPatient !== req.user.id)
+      return res.status(403).json({ error: 'Access denied.' });
+
+    // Load all case sheets with embeddings for this patient
+    const caseSheets = await CaseSheet.find({ patient: targetPatient });
+    if (caseSheets.length === 0)
+      return res.json({ answer: 'No case sheets found for this patient. Please upload medical documents first.' });
+
+    // Find most relevant chunks via cosine similarity
+    const relevantChunks = await findRelevantChunks(question, caseSheets);
+
+    if (relevantChunks.length === 0)
+      return res.json({ answer: 'Could not find relevant information in the uploaded case sheets.' });
+
+    // Build context from top chunks
+    const context = relevantChunks
+      .map((c, i) => `[Source: ${c.fileName}]\n${c.text}`)
+      .join('\n\n---\n\n');
+
+    // Ask LLaMA with context
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a medical assistant for Well Being Clinic. Answer questions about a patient's medical history based ONLY on the provided case sheet extracts. Be precise and factual. If the information is not in the context, say so clearly. Do not make up medical information.`,
+        },
+        {
+          role: 'user',
+          content: `Based on the following case sheet extracts, answer this question: "${question}"\n\nCASE SHEET DATA:\n${context}`,
+        },
+      ],
+      max_tokens: 600,
+      temperature: 0.3, // low temp for factual medical answers
+    });
+
+    const answer = completion.choices[0]?.message?.content || 'Could not generate an answer.';
+    res.json({ answer, sources: relevantChunks.map(c => ({ file: c.fileName, date: c.date })) });
+  } catch (err) {
+    console.error('RAG query error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── AI Chatbot ────────────────────────────────────────────────────────────────
 const CLINIC_CONTEXT = `

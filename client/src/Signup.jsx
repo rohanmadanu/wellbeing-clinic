@@ -70,7 +70,7 @@ export default function Signup({ onLogin }) {
         <div style={{ position: 'absolute', bottom: -60, left: -60, width: 260, height: 260, borderRadius: '50%', background: 'radial-gradient(circle, rgba(74,222,128,0.1) 0%, transparent 70%)' }} />
         <div style={{ position: 'relative', zIndex: 1 }}>
           <Link to="/" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 10, marginBottom: 56 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: 'linear-gradient(135deg, #1a9e6b 0%, #0d7a52 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 18, boxShadow: '0 4px 14px rgba(26,158,107,0.4)' }}>W</div>
+            <img src='/logo.jpg' alt='logo' style={{ height: 40, width: 40, objectFit: 'contain', borderRadius: 9 }} />
             <span style={{ fontFamily: "'Georgia', serif", fontWeight: 700, fontSize: 22, color: 'white' }}>Well<span style={{ color: '#1a9e6b' }}>being</span></span>
           </Link>
           <h1 style={{ fontFamily: "'Georgia', serif", fontSize: 36, fontWeight: 700, color: 'white', lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 16 }}>Start your wellness journey.</h1>

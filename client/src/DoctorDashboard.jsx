@@ -86,7 +86,7 @@ export default function DoctorDashboard({ user, onLogout }) {
       {/* Nav */}
       <nav style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '0 40px', height: 64, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 8px rgba(0,0,0,0.05)', boxSizing: 'border-box' }}>
         <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg, #1a9e6b 0%, #0d7a52 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 15 }}>W</div>
+          <img src='/logo.jpg' alt='logo' style={{ height: 34, width: 34, objectFit: 'contain', borderRadius: 7 }} />
           <span style={{ fontFamily: "'Georgia', serif", fontWeight: 700, fontSize: 18, color: '#0f1f17' }}>Well<span style={{ color: '#1a9e6b' }}>being</span></span>
         </Link>
         <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, background: '#ecfdf5', color: '#059669', padding: '4px 10px', borderRadius: 100, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Doctor Portal</span>

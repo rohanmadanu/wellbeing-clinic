@@ -218,13 +218,7 @@ function NavBar({ scrolled }) {
 
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #1a9e6b 0%, #0d7a52 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'white', fontWeight: 800, fontSize: 16,
-            boxShadow: '0 4px 12px rgba(26,158,107,0.35)',
-          }}>W</div>
+          <img src='/logo.jpg' alt='Well Being Clinic' style={{ height: 44, width: 44, objectFit: 'contain', borderRadius: 8 }} />
           <span style={{
             fontFamily: "'Georgia', 'Times New Roman', serif",
             fontWeight: 700, fontSize: 20,
@@ -238,9 +232,10 @@ function NavBar({ scrolled }) {
 
         {/* Nav links */}
         <div style={{ display: 'flex', gap: 36, alignItems: 'center' }}>
-          {['Services', 'Locations', 'Employers', 'For Members'].map(link => (
-            <NavLink key={link} scrolled={scrolled}>{link}</NavLink>
-          ))}
+          <NavLink scrolled={scrolled} onClick={() => document.getElementById('packages')?.scrollIntoView({ behavior: 'smooth' })}>Services</NavLink>
+          <NavLink scrolled={scrolled} onClick={() => document.getElementById('doctors')?.scrollIntoView({ behavior: 'smooth' })}>Our Doctors</NavLink>
+          <NavLink scrolled={scrolled} onClick={() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' })}>Contact</NavLink>
+          <NavLink scrolled={scrolled} onClick={() => document.getElementById('testimonials')?.scrollIntoView({ behavior: 'smooth' })}>Testimonials</NavLink>
         </div>
 
         {/* Auth buttons */}
@@ -253,14 +248,14 @@ function NavBar({ scrolled }) {
   );
 }
 
-function NavLink({ children, scrolled }) {
+function NavLink({ children, scrolled, onClick }) {
   const [hov, setHov] = useState(false);
   return (
-    <a href="#" style={{
+    <a href="#" onClick={e => { e.preventDefault(); onClick && onClick(); }} style={{
       fontFamily: "'DM Sans', sans-serif",
       fontSize: 14, fontWeight: 500,
       color: hov ? '#1a9e6b' : (scrolled ? '#374151' : 'rgba(255,255,255,0.88)'),
-      textDecoration: 'none', transition: 'color 0.2s', letterSpacing: '0.01em',
+      textDecoration: 'none', transition: 'color 0.2s', letterSpacing: '0.01em', cursor: 'pointer',
     }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
       {children}
     </a>
@@ -451,7 +446,7 @@ function StatsBar() {
 function PackagesSection() {
   const [selected, setSelected] = useState(null);
   return (
-    <section style={{ padding: '80px 32px 100px', background: 'white' }}>
+    <section id='packages' style={{ padding: '80px 32px 100px', background: 'white' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 40, fontWeight: 700, color: '#0f1f17', letterSpacing: '-0.02em', marginBottom: 48 }}>
           Packages
@@ -573,7 +568,7 @@ function AboutDoctors() {
   ];
 
   return (
-    <section style={{ padding: '80px 32px 90px', background: '#f8faf9' }}>
+    <section id='doctors' style={{ padding: '80px 32px 90px', background: '#f8faf9' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <h2 style={{
           fontFamily: "'Georgia', serif", fontSize: 40, fontWeight: 700,
@@ -636,7 +631,7 @@ function DoctorCard({ doc }) {
 // ─── Testimonials ─────────────────────────────────────────────────────────────
 function TestimonialsSection() {
   return (
-    <section style={{ padding: '72px 32px 80px', background: 'white' }}>
+    <section id='testimonials' style={{ padding: '72px 32px 80px', background: 'white' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <h2 style={{
           fontFamily: "'Georgia', serif", fontSize: 40, fontWeight: 700,
@@ -669,7 +664,7 @@ function TestimonialsSection() {
 // ─── Contact Section ─────────────────────────────────────────────────────────
 function ContactSection() {
   return (
-    <section style={{ padding: '72px 32px 64px', background: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+    <section id='contact' style={{ padding: '72px 32px 64px', background: '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <h2 style={{
           fontFamily: "'Georgia', serif", fontSize: 40, fontWeight: 700,

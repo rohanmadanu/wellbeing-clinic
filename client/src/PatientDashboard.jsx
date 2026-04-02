@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import CaseSheets from './CaseSheets';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 
@@ -9,7 +10,6 @@ function authHeaders() {
   return { headers: { Authorization: `Bearer ${localStorage.getItem('wb_token')}` } };
 }
 
-// Is it within 10 minutes of the appointment?
 function canJoin(date, time) {
   const [timePart, period] = time.split(' ');
   let [h, m] = timePart.split(':').map(Number);
@@ -21,15 +21,18 @@ function canJoin(date, time) {
 }
 
 export default function PatientDashboard({ user, onLogout }) {
-  const [doctors, setDoctors]           = useState([]);
-  const [appointments, setAppointments] = useState([]);
-  const [tab, setTab]                   = useState('book');
-  const [form, setForm]                 = useState({ doctorId: '', date: '', type: '', notes: '', mode: 'in-person' });
-  const [slots, setSlots]               = useState([]);
-  const [selectedSlot, setSelectedSlot] = useState('');
-  const [loadingSlots, setLoadingSlots] = useState(false);
-  const [status, setStatus]             = useState('');
-  const [loading, setLoading]           = useState(false);
+  const [doctors, setDoctors]             = useState([]);
+  const [appointments, setAppointments]   = useState([]);
+  const [tab, setTab]                     = useState('book');
+  const [form, setForm]                   = useState({ doctorId: '', date: '', type: '', notes: '', mode: 'in-person' });
+  const [slots, setSlots]                 = useState([]);
+  const [selectedSlot, setSelectedSlot]   = useState('');
+  const [loadingSlots, setLoadingSlots]   = useState(false);
+  const [status, setStatus]               = useState('');
+  const [loading, setLoading]             = useState(false);
+  const [profileForm, setProfileForm]     = useState({ name: user.name, phone: user.phone || '' });
+  const [profileMsg, setProfileMsg]       = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => { fetchDoctors(); fetchAppointments(); }, []);
@@ -81,6 +84,18 @@ export default function PatientDashboard({ user, onLogout }) {
     } finally { setLoading(false); }
   }
 
+  async function saveProfile() {
+    setSavingProfile(true); setProfileMsg('');
+    try {
+      await axios.patch(`${API}/auth/profile`, { name: profileForm.name, phone: profileForm.phone }, authHeaders());
+      setProfileMsg('success:Profile updated successfully!');
+      const updated = { ...user, name: profileForm.name, phone: profileForm.phone };
+      localStorage.setItem('wb_user', JSON.stringify(updated));
+    } catch {
+      setProfileMsg('error:Failed to update. Please try again.');
+    } finally { setSavingProfile(false); }
+  }
+
   function handleLogout() {
     localStorage.removeItem('wb_token'); localStorage.removeItem('wb_user');
     onLogout(); navigate('/');
@@ -97,12 +112,22 @@ export default function PatientDashboard({ user, onLogout }) {
       {/* Nav */}
       <nav style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '0 40px', height: 64, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 1px 8px rgba(0,0,0,0.05)', boxSizing: 'border-box' }}>
         <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg, #1a9e6b 0%, #0d7a52 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: 15 }}>W</div>
+          <img src='/logo.jpg' alt='logo' style={{ height: 34, width: 34, objectFit: 'contain', borderRadius: 7 }} />
           <span style={{ fontFamily: "'Georgia', serif", fontWeight: 700, fontSize: 18, color: '#0f1f17' }}>Well<span style={{ color: '#1a9e6b' }}>being</span></span>
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f3faf7', borderRadius: 100, padding: '6px 16px 6px 6px', border: '1px solid #d1fae5' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #1a9e6b, #0d7a52)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 11, fontWeight: 800 }}>{user.name.charAt(0).toUpperCase()}</div>
+          {user.patientId && (
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: '#6b7280', background: '#f3f4f6', padding: '4px 12px', borderRadius: 100 }}>
+              ID: {user.patientId}
+            </span>
+          )}
+          <div
+            onClick={() => setTab('profile')}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f3faf7', borderRadius: 100, padding: '6px 16px 6px 6px', border: '1px solid #d1fae5', cursor: 'pointer' }}
+          >
+            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #1a9e6b, #0d7a52)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 11, fontWeight: 800 }}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#0f1f17' }}>{user.name}</span>
           </div>
           <button onClick={handleLogout} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: '#6b7280', background: 'none', border: '1.5px solid #e5e7eb', borderRadius: 100, padding: '7px 18px', cursor: 'pointer' }}>Log out</button>
@@ -116,8 +141,8 @@ export default function PatientDashboard({ user, onLogout }) {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4, background: 'white', borderRadius: 14, padding: 4, border: '1px solid #e5e7eb', width: 'fit-content', marginBottom: 36 }}>
-          {[['book','📅 Book Appointment'],['history','📋 My Appointments']].map(([key, label]) => (
+        <div style={{ display: 'flex', gap: 4, background: 'white', borderRadius: 14, padding: 4, border: '1px solid #e5e7eb', width: 'fit-content', marginBottom: 36, flexWrap: 'wrap' }}>
+          {[['book','📅 Book Appointment'],['history','📋 My Appointments'],['casesheets','📄 Case Sheets'],['profile','👤 My Profile']].map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, padding: '9px 22px', borderRadius: 10, border: 'none', cursor: 'pointer', transition: 'all 0.2s', background: tab === key ? '#0f1f17' : 'transparent', color: tab === key ? 'white' : '#6b7280' }}>{label}</button>
           ))}
         </div>
@@ -131,13 +156,13 @@ export default function PatientDashboard({ user, onLogout }) {
               {/* Mode toggle */}
               <FF label="Appointment Type">
                 <div style={{ display: 'flex', gap: 10 }}>
-                  {[['in-person','🏥 In-Person'],['online','💻 Online (Zoom)']].map(([val, label]) => (
+                  {[['in-person','🏥 In-Person'],['online','💻 Online (Google Meet)']].map(([val, label]) => (
                     <button key={val} type="button" onClick={() => setForm(f => ({ ...f, mode: val }))} style={{ flex: 1, fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, padding: '12px 16px', borderRadius: 12, cursor: 'pointer', transition: 'all 0.2s', background: form.mode === val ? '#0f1f17' : 'white', color: form.mode === val ? 'white' : '#6b7280', border: form.mode === val ? '2px solid #0f1f17' : '2px solid #e5e7eb' }}>{label}</button>
                   ))}
                 </div>
                 {form.mode === 'online' && (
                   <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 12px' }}>
-                    📹 A unique Zoom link will be created and sent to you after booking. The "Join Meeting" button activates 10 minutes before your appointment.
+                    📹 A unique Google Meet link will be created automatically after booking.
                   </div>
                 )}
                 {form.mode === 'in-person' && (
@@ -147,14 +172,12 @@ export default function PatientDashboard({ user, onLogout }) {
                 )}
               </FF>
 
-              {/* Doctor */}
               <FF label="Select Doctor">
                 <select value={form.doctorId} onChange={e => setForm(f => ({ ...f, doctorId: e.target.value }))} style={SS}>
                   {doctors.length === 0 ? <option>No doctors available</option> : doctors.map(d => <option key={d._id} value={d._id}>{d.name}</option>)}
                 </select>
               </FF>
 
-              {/* Treatment */}
               <FF label="Treatment Type *">
                 <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} style={SS}>
                   <option value="">— Select a treatment —</option>
@@ -162,19 +185,16 @@ export default function PatientDashboard({ user, onLogout }) {
                 </select>
               </FF>
 
-              {/* Date */}
               <FF label="Preferred Date *">
                 <input type="date" min={today} max={maxDateStr} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={IS} onFocus={e => e.target.style.borderColor='#1a9e6b'} onBlur={e => e.target.style.borderColor='#e5e7eb'} />
-                <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>You can book up to 30 days in advance.</p>
               </FF>
 
-              {/* Time slots */}
               {form.date && form.doctorId && (
                 <FF label="Available Time Slots *">
                   {loadingSlots ? (
                     <p style={{ fontSize: 13, color: '#9ca3af' }}>Checking availability…</p>
                   ) : slots.length === 0 ? (
-                    <div style={{ fontSize: 13, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px' }}>No slots available on this date. Please choose another day.</div>
+                    <div style={{ fontSize: 13, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px' }}>No slots available on this date.</div>
                   ) : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
                       {slots.map(slot => (
@@ -185,9 +205,8 @@ export default function PatientDashboard({ user, onLogout }) {
                 </FF>
               )}
 
-              {/* Notes */}
               <FF label="Notes / Symptoms (optional)">
-                <textarea placeholder="Describe your symptoms or specific concerns…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} style={{ ...IS, resize: 'vertical' }} onFocus={e => e.target.style.borderColor='#1a9e6b'} onBlur={e => e.target.style.borderColor='#e5e7eb'} />
+                <textarea placeholder="Describe your symptoms…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} style={{ ...IS, resize: 'vertical' }} onFocus={e => e.target.style.borderColor='#1a9e6b'} onBlur={e => e.target.style.borderColor='#e5e7eb'} />
               </FF>
 
               {statusMsg && (
@@ -224,9 +243,9 @@ export default function PatientDashboard({ user, onLogout }) {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
                         <StatusBadge status={a.status} />
-                        {a.mode === 'online' && a.zoomJoinUrl && (
+                        {a.mode === 'online' && a.meetLink && (
                           canJoin(a.date, a.time) ? (
-                            <a href={a.zoomJoinUrl} target="_blank" rel="noreferrer" style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: 'white', background: '#2563eb', borderRadius: 100, padding: '8px 18px', textDecoration: 'none' }}>🎥 Join Meeting</a>
+                            <a href={a.meetLink} target="_blank" rel="noreferrer" style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: 'white', background: '#1a73e8', borderRadius: 100, padding: '8px 18px', textDecoration: 'none' }}>🎥 Join Meeting</a>
                           ) : (
                             <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: '#9ca3af', background: '#f3f4f6', borderRadius: 100, padding: '8px 18px' }}>🔒 Join link active 10 min before</span>
                           )
@@ -239,6 +258,76 @@ export default function PatientDashboard({ user, onLogout }) {
             )}
           </div>
         )}
+
+        {/* ── CASE SHEETS TAB ── */}
+        {tab === 'casesheets' && (
+          <div>
+            <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 700, color: '#0f1f17', marginBottom: 12 }}>My Case Sheets</h2>
+            <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, color: '#6b7280', marginBottom: 28 }}>Upload your medical documents — our AI extracts and stores the text. Images are never stored, only the extracted text.</p>
+            <CaseSheets user={user} />
+          </div>
+        )}
+
+        {/* ── PROFILE TAB ── */}
+        {tab === 'profile' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div style={{ background: 'white', borderRadius: 20, padding: '40px', border: '1px solid #e5e7eb', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
+
+              {/* Avatar + name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 36 }}>
+                <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg, #1a9e6b, #0d7a52)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 28, fontWeight: 800, flexShrink: 0 }}>
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h2 style={{ fontFamily: "'Georgia', serif", fontSize: 24, fontWeight: 700, color: '#0f1f17', margin: 0, marginBottom: 6 }}>{user.name}</h2>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, background: '#f0fdf4', color: '#15803d', padding: '3px 10px', borderRadius: 100 }}>Patient</span>
+                    {user.patientId && <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, background: '#f3f4f6', color: '#6b7280', padding: '3px 10px', borderRadius: 100 }}>ID: {user.patientId}</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Info grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32 }}>
+                {[
+                  ['📧 Email', user.email],
+                  ['📱 Phone', user.phone || 'Not provided'],
+                  ['🪪 Patient ID', user.patientId || 'N/A'],
+                  ['👤 Role', 'Patient'],
+                  ['📅 Total Appointments', String(appointments.length)],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ background: '#f8faf9', borderRadius: 12, padding: '14px 18px' }}>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: '#9ca3af', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700, color: '#0f1f17' }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Edit form */}
+              <h3 style={{ fontFamily: "'Georgia', serif", fontSize: 18, fontWeight: 700, color: '#0f1f17', marginBottom: 20 }}>Edit Details</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <FF label="Full Name">
+                  <input value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} style={IS} onFocus={e => e.target.style.borderColor='#1a9e6b'} onBlur={e => e.target.style.borderColor='#e5e7eb'} />
+                </FF>
+                <FF label="Phone Number">
+                  <input value={profileForm.phone} onChange={e => setProfileForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91 98765 43210" style={IS} onFocus={e => e.target.style.borderColor='#1a9e6b'} onBlur={e => e.target.style.borderColor='#e5e7eb'} />
+                </FF>
+                <FF label="Email (cannot be changed)">
+                  <input value={user.email} disabled style={{ ...IS, background: '#f3f4f6', color: '#9ca3af' }} />
+                </FF>
+                {profileMsg && (
+                  <div style={{ fontSize: 13, padding: '10px 14px', borderRadius: 10, background: profileMsg.startsWith('success') ? '#f0fdf4' : '#fef2f2', color: profileMsg.startsWith('success') ? '#15803d' : '#dc2626', border: `1px solid ${profileMsg.startsWith('success') ? '#bbf7d0' : '#fecaca'}` }}>
+                    {profileMsg.split(':').slice(1).join(':')}
+                  </div>
+                )}
+                <button onClick={saveProfile} disabled={savingProfile} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700, color: 'white', background: savingProfile ? '#9ca3af' : 'linear-gradient(135deg, #1a9e6b, #0d7a52)', border: 'none', borderRadius: 100, padding: '13px 32px', cursor: savingProfile ? 'not-allowed' : 'pointer', alignSelf: 'flex-start', boxShadow: '0 4px 14px rgba(26,158,107,0.3)' }}>
+                  {savingProfile ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
     </div>
